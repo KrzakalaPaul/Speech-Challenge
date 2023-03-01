@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
+from torch.distributions.bernoulli import Bernoulli
 from collections import defaultdict
 import numpy as np
 
@@ -153,7 +154,7 @@ class RnnSenderReinforce(nn.Module):
     >>> message.size()  # batch size x max_len
     torch.Size([16, 10])
     """
-    def __init__(self, agent, vocab_size, embed_dim, hidden_size, max_len, num_layers=1, cell='rnn', force_eos=True):
+    def __init__(self, agent, vocab_size, embed_dim, hidden_size, max_len, num_layers=1, cell='rnn', force_eos=True, p_corruption=0.):
         """
         :param agent: the agent to be wrapped
         :param vocab_size: the communication vocabulary size
@@ -180,6 +181,7 @@ class RnnSenderReinforce(nn.Module):
         self.vocab_size = vocab_size
         self.num_layers = num_layers
         self.cells = None
+        
 
         cell = cell.lower()
         cell_types = {'rnn': nn.RNNCell, 'gru': nn.GRUCell, 'lstm': nn.LSTMCell}
@@ -194,10 +196,24 @@ class RnnSenderReinforce(nn.Module):
 
         self.reset_parameters()
 
+        # NEW
+
+        # Probability of miss transmission
+        self.p_corruption=nn.Parameter(torch.tensor([p_corruption]),requires_grad=False)
+
+        # If misstransmitted use this random distribution (uniform except [EOS])
+        random_probs=torch.flatten(torch.full((vocab_size,), 1/(vocab_size-1)))
+        random_probs[0]=0
+        self.random_probs=nn.Parameter(random_probs,requires_grad=False)
+
+
     def reset_parameters(self):
         nn.init.normal_(self.sos_embedding, 0.0, 0.01)
 
     def forward(self, x):
+
+        batchsize=len(x)
+
         prev_hidden = [self.agent(x)]
         prev_hidden.extend([torch.zeros_like(prev_hidden[0]) for _ in range(self.num_layers - 1)])
 
@@ -205,9 +221,9 @@ class RnnSenderReinforce(nn.Module):
 
         input = torch.stack([self.sos_embedding] * x.size(0))
 
-        sequence = []
-        logits = []
-        entropy = []
+        sequence_received = []
+        logits = []  # -> logits of the recevied distribution
+        entropy = [] # -> logits of the emmited distribution (this is the one we regularize)
 
         for step in range(self.max_len):
             for i, layer in enumerate(self.cells):
@@ -219,27 +235,36 @@ class RnnSenderReinforce(nn.Module):
                 prev_hidden[i] = h_t
                 input = h_t
 
+            emission_probs = F.softmax(self.hidden_to_output(h_t), dim=1)
 
-            step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
-            # ATTENTION ENLEVER LAJOUT
-            #if step==0:
-            #    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)-1000*torch.cat((torch.zeros((h_t.size(0),1)),torch.ones((h_t.size(0),int(self.vocab_size/2))),torch.zeros((h_t.size(0),int(self.vocab_size/2)))),dim=1).to("cuda")
-            #else:
-            #    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)-1000*torch.cat((torch.zeros((h_t.size(0),1)),torch.zeros((h_t.size(0),int(self.vocab_size/2))),torch.ones((h_t.size(0),int(self.vocab_size/2)))),dim=1).to("cuda")
-            distr = Categorical(logits=step_logits)
-            entropy.append(distr.entropy())
+            if not(self.training):
+                emission_probs=torch.zeros_like(emission_probs).scatter(1, emission_probs.argmax(1,True), value=1)
 
-            if self.training:
-                x = distr.sample()
-            else:
-                x = step_logits.argmax(dim=1)
+            distr_emission = Categorical(probs=emission_probs)
+            x_emmited = distr_emission.sample()
 
-            logits.append(distr.log_prob(x))
+            distr_random= Categorical(probs=self.random_probs)
+            random = distr_random.sample((batchsize,))
 
-            input = self.embedding(x)
-            sequence.append(x)
+            corruption_probs=Bernoulli(self.p_corruption)
+            corrupted = corruption_probs.sample((batchsize,)).to(dtype=torch.long)
 
-        sequence = torch.stack(sequence).permute(1, 0)
+            x_received =torch.gather(torch.concat([x_emmited.reshape(-1,1),random.reshape(-1,1)],dim=1),1,corrupted).flatten()
+
+            corrupted_probs=(1-self.p_corruption)*emission_probs+self.p_corruption*self.random_probs
+
+            distr_reception = Categorical(probs=corrupted_probs)
+            # Speaker thinks he outputed :
+            input = self.embedding(x_emmited)
+            # Listener actually received :
+            sequence_received.append(x_received)
+            # The probability that he received it was :
+            logits.append(distr_reception.log_prob(x_received))
+            # Enforce exploration for the speaker:
+            entropy.append(distr_emission.entropy())   
+
+
+        sequence = torch.stack(sequence_received).permute(1, 0)
         logits = torch.stack(logits).permute(1, 0)
         entropy = torch.stack(entropy).permute(1, 0)
 
