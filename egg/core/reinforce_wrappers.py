@@ -154,7 +154,7 @@ class RnnSenderReinforce(nn.Module):
     >>> message.size()  # batch size x max_len
     torch.Size([16, 10])
     """
-    def __init__(self, agent, vocab_size, embed_dim, hidden_size, max_len, num_layers=1, cell='rnn', force_eos=True):
+    def __init__(self, agent, vocab_size, embed_dim, hidden_size, max_len, num_layers=1, cell='rnn', force_eos=True,p_corruption=0.0):
         """
         :param agent: the agent to be wrapped
         :param vocab_size: the communication vocabulary size
@@ -195,7 +195,7 @@ class RnnSenderReinforce(nn.Module):
 
         self.reset_parameters()
 
-        self.p_corruption=0.
+        self.p_corruption=p_corruption
         self.distr_corruption=Bernoulli(torch.tensor([self.p_corruption],device='cuda'))
 
         self.random_probs=torch.flatten(torch.full((vocab_size,), 1/(vocab_size-1),device='cuda'))
