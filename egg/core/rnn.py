@@ -52,7 +52,7 @@ class RnnEncoder(nn.Module):
 
         if lengths is None:
             lengths = find_lengths(message)
-        
+
         packed = nn.utils.rnn.pack_padded_sequence(
             emb, lengths.cpu(), batch_first=True, enforce_sorted=False)
         _, rnn_hidden = self.cell(packed)

@@ -70,6 +70,8 @@ def get_params(params):
                         help="Name for your checkpoint (default: model)")
     parser.add_argument('--early_stopping_thr', type=float, default=0.9999,
                         help="Early stopping threshold on accuracy (default: 0.9999)")
+
+    # AJOUT
     parser.add_argument('--dir_save', type=str, default="expe_1",
                         help="Directory in which we will save the information")
     parser.add_argument('--unigram_pen', type=float, default=0.0,
@@ -80,11 +82,6 @@ def get_params(params):
                         help='Print message ?')
     parser.add_argument('--reg', type=bool, default=False,
                         help='Add regularization ?')
-    
-    # AJOUT 
-
-    parser.add_argument('--p_corruption', type=float, default=0.0,
-                        help='proba that letter is misstransmited')
 
     args = core.init(parser, params)
 
@@ -322,7 +319,7 @@ def main(params):
         sender = core.RnnSenderReinforce(sender,
                                    opts.vocab_size, opts.sender_embedding, opts.sender_hidden,
                                    cell=opts.sender_cell, max_len=opts.max_len, num_layers=opts.sender_num_layers,
-                                   force_eos=force_eos,p_corruption=opts.p_corruption)
+                                   force_eos=force_eos)
     if opts.receiver_cell == 'transformer':
         receiver = Receiver(n_features=opts.n_features, n_hidden=opts.receiver_embedding)
         receiver = core.TransformerReceiverDeterministic(receiver, opts.vocab_size, opts.max_len,
@@ -371,7 +368,6 @@ def main(params):
           trainer.optimizer.defaults["lr"]/=2
 
         trainer.train(n_epochs=1)
-        
         if opts.checkpoint_dir:
             trainer.save_checkpoint(name=f'{opts.name}_vocab{opts.vocab_size}_rs{opts.random_seed}_lr{opts.lr}_shid{opts.sender_hidden}_rhid{opts.receiver_hidden}_sentr{opts.sender_entropy_coeff}_reg{opts.length_cost}_max_len{opts.max_len}')
 
