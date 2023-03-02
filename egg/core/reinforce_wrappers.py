@@ -221,7 +221,7 @@ class RnnSenderReinforce(nn.Module):
 
         input = torch.stack([self.sos_embedding] * x.size(0))
 
-        sequence_received = []
+        sequence = []
         logits = []  # -> logits of the recevied distribution
         entropy = [] # -> logits of the emmited distribution (this is the one we regularize)
 
@@ -235,6 +235,29 @@ class RnnSenderReinforce(nn.Module):
                 prev_hidden[i] = h_t
                 input = h_t
 
+            # OLD 
+
+            step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
+            # ATTENTION ENLEVER LAJOUT
+            #if step==0:
+            #    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)-1000*torch.cat((torch.zeros((h_t.size(0),1)),torch.ones((h_t.size(0),int(self.vocab_size/2))),torch.zeros((h_t.size(0),int(self.vocab_size/2)))),dim=1).to("cuda")
+            #else:
+            #    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)-1000*torch.cat((torch.zeros((h_t.size(0),1)),torch.zeros((h_t.size(0),int(self.vocab_size/2))),torch.ones((h_t.size(0),int(self.vocab_size/2)))),dim=1).to("cuda")
+            distr = Categorical(logits=step_logits)
+            entropy.append(distr.entropy())
+
+            if self.training:
+                x = distr.sample()
+            else:
+                x = step_logits.argmax(dim=1)
+
+            logits.append(distr.log_prob(x))
+
+            input = self.embedding(x)
+            sequence.append(x)
+
+            # NEW
+            '''
             emission_probs = F.softmax(self.hidden_to_output(h_t), dim=1)
 
             if not(self.training):
@@ -257,14 +280,14 @@ class RnnSenderReinforce(nn.Module):
             # Speaker thinks he outputed :
             input = self.embedding(x_emmited)
             # Listener actually received :
-            sequence_received.append(x_received)
+            sequence.append(x_received)
             # The probability that he received it was :
             logits.append(distr_reception.log_prob(x_received))
             # Enforce exploration for the speaker:
             entropy.append(distr_emission.entropy())   
+            '''
 
-
-        sequence = torch.stack(sequence_received).permute(1, 0)
+        sequence = torch.stack(sequence).permute(1, 0)
         logits = torch.stack(logits).permute(1, 0)
         entropy = torch.stack(entropy).permute(1, 0)
 
