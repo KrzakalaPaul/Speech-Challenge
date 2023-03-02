@@ -218,15 +218,27 @@ class RnnSenderReinforce(nn.Module):
                     h_t = layer(input, prev_hidden[i])
                 prev_hidden[i] = h_t
                 input = h_t
-
-
+        
+            # OLD 
+            '''
             step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
-            # ATTENTION ENLEVER LAJOUT
-            #if step==0:
-            #    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)-1000*torch.cat((torch.zeros((h_t.size(0),1)),torch.ones((h_t.size(0),int(self.vocab_size/2))),torch.zeros((h_t.size(0),int(self.vocab_size/2)))),dim=1).to("cuda")
-            #else:
-            #    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)-1000*torch.cat((torch.zeros((h_t.size(0),1)),torch.zeros((h_t.size(0),int(self.vocab_size/2))),torch.ones((h_t.size(0),int(self.vocab_size/2)))),dim=1).to("cuda")
             distr = Categorical(logits=step_logits)
+            entropy.append(distr.entropy())
+
+            if self.training:
+                x = distr.sample()
+            else:
+                x = step_logits.argmax(dim=1)
+
+            logits.append(distr.log_prob(x))
+
+            input = self.embedding(x)
+            sequence.append(x)
+            '''
+            # NEW 
+
+            step_logits = F.softmax(self.hidden_to_output(h_t), dim=1)
+            distr = Categorical(probs=step_logits)
             entropy.append(distr.entropy())
 
             if self.training:
