@@ -335,8 +335,6 @@ class RnnSenderReinforce(nn.Module):
 
                 else:
 
-                    print('TESTING NO NOISE')
-
                     step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
                     distr = Categorical(logits=step_logits)
                     entropy.append(distr.entropy())
