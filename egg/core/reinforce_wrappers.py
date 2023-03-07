@@ -195,12 +195,22 @@ class RnnSenderReinforce(nn.Module):
 
         self.reset_parameters()
 
-        self.p_corruption=p_corruption
+        self.set_noise(p_corruption)
+
+        
+        self.bad_reinforce=False
+        self.test_with_noise=False
+
+    def set_noise(self,p):
+        
+        self.p_corruption=p
         self.distr_corruption=Bernoulli(torch.tensor([self.p_corruption],device='cuda'))
 
-        self.random_probs=torch.flatten(torch.full((vocab_size,), 1/(vocab_size-1),device='cuda'))
+        self.random_probs=torch.flatten(torch.full((self.vocab_size,), 1/(self.vocab_size-1),device='cuda'))
         self.random_probs[0]=0
         self.distr_random=Categorical(probs=self.random_probs)
+
+
 
 
     def reset_parameters(self):
@@ -255,6 +265,7 @@ class RnnSenderReinforce(nn.Module):
 
             if self.training:
                 
+                # ----------------------- MAIN ----------------------- #
                 distr_emission = Categorical(probs=emission_probs)
                 x_emmited = distr_emission.sample()
 
@@ -267,30 +278,76 @@ class RnnSenderReinforce(nn.Module):
                 corrupted_probs=(1-self.p_corruption)*emission_probs+self.p_corruption*self.random_probs
 
                 distr_reception = Categorical(probs=corrupted_probs)
+                # ----------------------- MAIN ----------------------- #
 
-                # Speaker thinks he outputed :
-                input = self.embedding(x_emmited)
-                # Listener actually received :
-                sequence.append(x_received)
-                # The probability that he received it was :
-                logits.append(distr_reception.log_prob(x_received))
-                # Enforce exploration for the speaker:
-                entropy.append(distr_emission.entropy())   
+                if self.bad_reinforce:
+                    # Speaker thinks he outputed :
+                    input = self.embedding(x_emmited)
+                    # Listener actually received :
+                    sequence.append(x_received)
+                    # The probability that he received it was :
+                    logits.append(distr_emission.log_prob(x_emmited))
+                    # Enforce exploration for the speaker:
+                    entropy.append(distr_emission.entropy())   
+
+
+                else:
+
+                    # Speaker thinks he outputed :
+                    input = self.embedding(x_emmited)
+                    # Listener actually received :
+                    sequence.append(x_received)
+                    # The probability that he received it was :
+                    logits.append(distr_reception.log_prob(x_received))
+                    # Enforce exploration for the speaker:
+                    entropy.append(distr_emission.entropy())   
 
             else:
-                #emission_probs=torch.zeros_like(emission_probs).scatter(1, emission_probs.argmax(1,True), value=1)
 
-                step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
-                distr = Categorical(logits=step_logits)
-                entropy.append(distr.entropy())
+                if self.test_with_noise:
+
+                    emission_probs=torch.zeros_like(emission_probs).scatter(1, emission_probs.argmax(1,True), value=1)
+
+                    # ----------------------- MAIN ----------------------- #
+                    distr_emission = Categorical(probs=emission_probs)
+                    x_emmited = distr_emission.sample()
+
+                    random = self.distr_random.sample((batchsize,))
+
+                    corrupted = self.distr_corruption.sample((batchsize,)).to(dtype=torch.long)
+
+                    x_received =torch.gather(torch.concat([x_emmited.reshape(-1,1),random.reshape(-1,1)],dim=1),1,corrupted).flatten()
+
+                    corrupted_probs=(1-self.p_corruption)*emission_probs+self.p_corruption*self.random_probs
+
+                    distr_reception = Categorical(probs=corrupted_probs)
+                    # ----------------------- MAIN ----------------------- #
+
+                    # Speaker thinks he outputed :
+                    input = self.embedding(x_emmited)
+                    # Listener actually received :
+                    sequence.append(x_received)
+                    # The probability that he received it was :
+                    logits.append(distr_reception.log_prob(x_received))
+                    # Enforce exploration for the speaker:
+                    entropy.append(distr_emission.entropy())   
+
+
+                else:
+
+                    print('TESTING NO NOISE')
+
+                    step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
+                    distr = Categorical(logits=step_logits)
+                    entropy.append(distr.entropy())
+                    
+                    x = step_logits.argmax(dim=1)
+
+                    logits.append(distr.log_prob(x))
+
+                    input = self.embedding(x)
+                    sequence.append(x)
                 
-                x = step_logits.argmax(dim=1)
-
-                logits.append(distr.log_prob(x))
-
-                input = self.embedding(x)
-                sequence.append(x)
-            
             
 
         sequence = torch.stack(sequence).permute(1, 0)

@@ -85,6 +85,10 @@ def get_params(params):
                         help="Impatient listener")
     parser.add_argument('--unigram_pen', type=float, default=0.0,
                         help="Add a penalty for redundancy")
+    
+    parser.add_argument('--p_corruption', type=float, default=0.0,
+                    help='Probability of corruption of the message')
+
 
     args = core.init(parser, params)
 
@@ -156,7 +160,7 @@ def main(params):
         sender = core.RnnSenderReinforce(sender,
                                    opts.vocab_size, opts.sender_embedding, opts.sender_hidden,
                                    cell=opts.sender_cell, max_len=opts.max_len, num_layers=opts.sender_num_layers,
-                                   force_eos=force_eos)
+                                   force_eos=force_eos,p_corruption=opts.p_corruption)
     if opts.receiver_cell == 'transformer':
         receiver = Receiver(n_features=opts.n_features, n_hidden=opts.receiver_embedding)
         receiver = core.TransformerReceiverDeterministic(receiver, opts.vocab_size, opts.max_len,
